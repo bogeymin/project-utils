@@ -14,6 +14,7 @@ __all__ = (
     "EXPERIMENTAL",
     "LICENSE_CHOICES",
     "PROJECT_HOME",
+    "PROJECTS_ON_HOLD",
     "TESTING",
     "TESTING_ENVIRONMENT",
     "STAGING",
@@ -67,6 +68,9 @@ EXIT_OTHER = 4
 
 # Location of projects. User home is automatically expanded.
 PROJECT_HOME = os.environ.get("PROJECT_HOME", "~/Work")
+
+# Location of projects on hold.
+PROJECTS_ON_HOLD = os.environ.get("PROJECTS_ON_HOLD", os.path.join(PROJECT_HOME, ".hold"))
 
 # License options for the lice command.
 LICENSE_CHOICES = (

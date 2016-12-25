@@ -250,28 +250,9 @@ class Project(Config):
         self.tags = list()
         self.title = None
         self.type = "project"
-
         self._requirements = list()
 
-        # Handle version.
-        if self.path_exists("VERSION.txt"):
-            self.version_txt = os.path.join(self.root, "VERSION.txt")
-            self.version = read_file(self.version_txt)
-        else:
-            self.version = "0.1.0-d"
-
-        self.version_py = None
-        locations = (
-            os.path.join(self.root, "version.py"),
-            os.path.join(self.root, name, "version.py"),
-            os.path.join(self.root, "source", "main", "version.py"),
-        )
-        for i in locations:
-            if os.path.exists(i):
-                self.version_py = i
-                break
-
-        # Handle config file.
+        # Handle config file. We have to do this here in order to call super() below.
         config_path = os.path.join(self.root, "project.ini")
         if os.path.exists(config_path):
             self.config_exists = True
@@ -285,6 +266,15 @@ class Project(Config):
 
     @property
     def exists(self):
+        """Indicates whether the project root exists.
+
+        :rtype: bool
+
+        .. note::
+            We've made this a dynamic property because it is possible for the root to be created after the project
+            instance has been created.
+
+        """
         return os.path.exists(self.root)
 
     def get_business(self):
@@ -387,6 +377,10 @@ class Project(Config):
 
         """
         return self.client is not None
+
+    @property
+    def has_scm(self):
+        return self._get_scm() is not None
 
     def initialize(self, display=True):
         """Initialize the project, creating various meta files as needed.
@@ -516,8 +510,8 @@ class Project(Config):
 
         # Get meta data.
         self.org = self._get_org()
-        self.scm = self._get_scm().strip()
-        self.version = self._get_version()
+        self.scm = self._get_scm()
+        self._load_version()
 
         # Calculate disk space.
         if include_disk:
@@ -618,7 +612,12 @@ class Project(Config):
         return os.path.join(self.root, name)
 
     def _get_scm(self):
-        """Determine the SCM in use and get the current state."""
+        """Determine the SCM in use and get the current state.
+
+        :rtype: str | None
+        :returns: Returns the type of SCM in use or ``None`` if no SCM is recognized.
+
+        """
         if self.path_exists(".git"):
             # See http://stackoverflow.com/a/5737794/241720
             cmd = '(cd %s && test -z "$(git status --porcelain)")' % self.root
@@ -630,22 +629,26 @@ class Project(Config):
 
             return "git"
         elif self.path_exists(".hg"):
-            # TODO: Determine if hg repo is dirty.
+            # See http://stackoverflow.com/a/11012582/241720
+            cmd = '(cd %s && hg identify --id | grep --quiet + ; echo $?)' % self.root
+            (status, output) = commands.getstatusoutput(cmd)
+            if status >= 1:
+                self.is_dirty = True
+            else:
+                self.is_dirty = False
+
             return "hg"
-        elif self.path_exists("trunk"):
-            # TODO: Determine if svn repo is dirty.
+        elif self.path_exists(".svn"):
+            cmd = 'test -z "`(cd %s && svn status)`"' % self.root
+            (status, output) = commands.getstatusoutput(cmd)
+            if status >= 1:
+                self.is_dirty = True
+            else:
+                self.is_dirty = False
+
             return "svn"
         else:
-            return "None"
-
-    def _get_version(self):
-        if self.path_exists("VERSION.txt"):
-            with open(self._get_path("VERSION.txt"), "rb") as f:
-                v = f.read().strip()
-                f.close()
-                return v
-        else:
-            return "0.1.0-d"
+            return None
 
     def _load_section(self, name, values):
         """Overridden to add business, client, and project section values to the current instance."""
@@ -660,3 +663,32 @@ class Project(Config):
                 setattr(self, key, values[key])
         else:
             super(Project, self)._load_section(name, values)
+
+    def _load_version(self):
+        """Get project version info.
+
+        :rtype: str
+        :returns: Returns the version string.
+
+        .. note::
+            This method sets the ``version``, ``version_py``, and ``version_txt`` attributes.
+
+        """
+        # Always set version_txt whether it exists or not. This allows it to be created if it does not already exist.
+        self.version_txt = os.path.join(self.root, "VERSION.txt")
+        if os.path.exists(self.version_txt):
+            self.version = read_file(self.version_txt)
+        else:
+            self.version = "0.1.0-d"
+
+        # Set the path to the version.py file.
+        self.version_py = None
+        locations = (
+            os.path.join(self.root, "version.py"),
+            os.path.join(self.root, self.name, "version.py"),
+            os.path.join(self.root, "source", "main", "version.py"),
+        )
+        for i in locations:
+            if os.path.exists(i):
+                self.version_py = i
+                break
