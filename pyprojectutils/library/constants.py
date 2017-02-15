@@ -1,6 +1,7 @@
 import os
 
 __all__ = (
+    "AUTHOR",
     "BASE_ENVIRONMENT",
     "BITBUCKET_ENABLED",
     "BITBUCKET_SCM",
@@ -13,6 +14,7 @@ __all__ = (
     "DEVELOPER_CODE",
     "DEVELOPER_NAME",
     "DEVELOPMENT_ENVIRONMENT",
+    "DOCUMENTATION_HOME",
     "ENVIRONMENTS",
     "EXIT_ENV",
     "EXIT_INPUT",
@@ -30,6 +32,7 @@ __all__ = (
     "PROJECT_ARCHIVE",
     "PROJECT_HOME",
     "PROJECTS_ON_HOLD",
+    "PUBLISHER",
     "REPO_META_PATH",
     "STAGING",
     "STAGING_ENVIRONMENT",
@@ -45,6 +48,13 @@ DEVELOPER_NAME = os.environ.get("DEVELOPER_NAME", "Unidentified")
 # Organization types help identify who is involved in a project.
 BUSINESS = "business"
 CLIENT = "client"
+
+# Documentation may have an author and publisher.
+AUTHOR = "author"
+PUBLISHER = "publisher"
+
+# Documentation is stored in a specific location.
+DOCUMENTATION_HOME = os.environ.get("DOCUMENTATION_HOME", os.path.expanduser("~/Dropbox/Business/Documentation"))
 
 # Standard stage identifiers.
 EXPERIMENTAL = "experimental"
@@ -80,7 +90,7 @@ EXIT_ENV = 3
 EXIT_OTHER = 4
 
 # Location of projects. User home is automatically expanded.
-PROJECT_HOME = os.environ.get("PROJECT_HOME", "~/Work")
+PROJECT_HOME = os.environ.get("PROJECT_HOME", os.path.expanduser("~/Work"))
 
 # Location of archived projects.
 PROJECT_ARCHIVE = os.environ.get("PROJECT_ARCHIVE", os.path.join(PROJECT_HOME, ".archive"))

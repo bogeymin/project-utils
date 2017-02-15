@@ -6,9 +6,10 @@ from datetime import datetime
 import os
 import sys
 from datetime_machine import DateTime
-from library.constants import BASE_ENVIRONMENT, BITBUCKET_USER, DEFAULT_SCM, DEVELOPMENT, ENVIRONMENTS, EXIT_OK, \
-    EXIT_INPUT, EXIT_OTHER, EXIT_USAGE, GITHUB_ENABLED, GITHUB_PASSWORD, GITHUB_USER, LICENSE_CHOICES, \
-    PROJECT_ARCHIVE, PROJECT_HOME, PROJECTS_ON_HOLD, REPO_META_PATH
+from library.constants import BASE_ENVIRONMENT, BITBUCKET_USER, DEFAULT_SCM, DEVELOPMENT, DOCUMENTATION_HOME, \
+    ENVIRONMENTS, EXIT_OK, EXIT_INPUT, EXIT_OTHER, EXIT_USAGE, GITHUB_ENABLED, GITHUB_PASSWORD, GITHUB_USER, \
+    LICENSE_CHOICES, PROJECT_ARCHIVE, PROJECT_HOME, PROJECTS_ON_HOLD, REPO_META_PATH
+from library.docs import Entry as DocumentationEntry
 from library.exceptions import OutputError
 from library.issues import Issue
 from library.projects import autoload_project, get_distinct_project_attributes, get_projects, Project
@@ -1628,34 +1629,188 @@ The special --hold option may be used to list only projects that are on hold. Se
             else:
                 scm += " (unknown)"
 
+
+def list_documentation_command():
+    """Find, parse, and collect documentation information."""
+
+    __author__ = "Shawn Davis <shawn@develmaycare.com>"
+    __date__ = "2017-02-14"
+    __help__ = """FILTERING
+
+Use the -f/--filter option to by most project attributes:
+
+- author (partial, case insensitive)
+- category
+- description (partial, case insensitive)
+- name (partial, case insensitive)
+- publisher (partial, case insensitive)
+- tag
+- type
+
+"""
+    __version__ = "0.2.0-d"
+
+    # Define options and arguments.
+    parser = ArgumentParser(description=__doc__, epilog=__help__, formatter_class=RawDescriptionHelpFormatter)
+
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        dest="show_all",
+        help="Show documentation even if there is no info.ini file."
+    )
+
+    parser.add_argument(
+        "-d",
+        "--disk",
+        action="store_true",
+        dest="include_disk",
+        help="Calculate disk space. Takes longer to run."
+    )
+
+    parser.add_argument(
+        "-f=",
+        "--filter=",
+        action="append",
+        dest="criteria",
+        help="Specify filter in the form of key:value. This may be repeated. Use ? to list available values."
+    )
+
+    parser.add_argument(
+        "-p=",
+        "--path=",
+        default=DOCUMENTATION_HOME,
+        dest="documentation_home",
+        help="Path to the documentation library. Defaults to %s" % DOCUMENTATION_HOME
+    )
+
+    # Access to the version number requires special consideration, especially
+    # when using sub parsers. The Python 3.3 behavior is different. See this
+    # answer: http://stackoverflow.com/questions/8521612/argparse-optional-subparser-for-version
+    # parser.add_argument('--version', action='version', version='%(prog)s 2.0')
+    parser.add_argument(
+        "-v",
+        action="version",
+        help="Show version number and exit.",
+        version=__version__
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        help="Show verbose version information and exit.",
+        version="%(prog)s" + " %s %s by %s" % (__version__, __date__, __author__)
+    )
+
+    # Parse arguments. Help, version, and usage errors are automatically handled.
+    args = parser.parse_args()
+    # print args
+
+    # Make sure DOCUMENTATION_HOME exists.
+    if not os.path.exists(args.documentation_home):
+        print_error("DOCUMENTATION_HOME does not exist: %s" % args.documentation_home, exit_code=EXIT_OTHER)
+
+    # Capture (and validate) filtering options.
+    criteria = dict()
+    if args.criteria:
+        for c in args.criteria:
+
+            # We need to test for the proper format of the each filter given.
+            try:
+                key, value = c.split(":")
+            except ValueError:
+                print_warning('Filter must be given in "key:value" format: %s' % c)
+                sys.exit(EXIT_INPUT)
+
+            # Handle requests to display available values by which filtering may occur. Otherwise, set criteria.
+            if value == "?":
+                print(key)
+                print("-" * 80)
+
+                d = DocumentationEntry.get_distinct_attribute_values(key, path=DOCUMENTATION_HOME)
+                for name, count in d.items():
+                    print("%s (%s)" % (name, count))
+
+                print("")
+
+                sys.exit(EXIT_OK)
+            else:
+                criteria[key] = value
+
+    # Print the report heading.
+    heading = "Documentation"
+    if "type" in criteria:
+        heading += " (%s)" % criteria['type']
+
+    print("=" * 120)
+    print(heading)
+    print("=" * 120)
+
+    # Print the column headings.
+    print(
+        "%-30s %-20s %-20s %-30s %-10s %-10s"
+        % ("Title", "Category", "Type", "Author", "Disk", "")
+    )
+    print("-" * 120)
+
+    # Print the rows.
+    entries = DocumentationEntry.fetch(
+        criteria=criteria,
+        include_disk=args.include_disk,
+        path=args.documentation_home,
+        show_all=args.show_all
+    )
+
+    if len(entries) == 0:
+        print("")
+        print("No results.")
+        sys.exit(EXIT_OK)
+
+    error_count = 0
+    for e in entries:
+        if len(e.title) > 30:
+            title = e.title[:27] + "..."
+        else:
+            title = e.title
+
+        if len(e.org) > 30:
+            org = e.org[:27] + "..."
+        else:
+            org = e.org
+
+        if e.config_exists:
+            config_exists = ""
+        else:
+            config_exists = "*"
+
+        if e.has_error:
+            config_exists += " (e)"
+            error_count += 1
+        else:
+            pass
+
         print(
-            "%-30s %-20s %-15s %-5s %-10s %-15s %-10s %-20s %-1s"
-            % (title, p.category, p.type, p.org, p.version, p.status, p.disk, scm, config_exists)
+            "%-30s %-20s %-20s %-30s %-10s %-10s"
+            % (title, e.category, e.type, org, e.disk, config_exists)
         )
 
-    if len(projects) == 1:
+    if len(entries) == 1:
         label = "result"
     else:
         label = "results"
 
-    print("-" * 130)
+    print("-" * 120)
     print("")
-    print("%s %s." % (len(projects), label))
+    print("%s %s." % (len(entries), label))
 
     if args.show_all:
-        print("* indicates absence of project.ini file.")
+        print("* indicates absence of info.ini file.")
 
     if error_count >= 1:
-        print("(e) indicates an error parsing the project.ini file. Use the --name switch to find out more.")
+        print("(e) indicates an error parsing the info.ini file.")
 
-    if dirty_count == 1:
-        print("One project with uncommitted changes: %s" % dirty_list[0])
-    elif dirty_count > 1:
-        print("%s projects with uncommitted changes." % dirty_count)
-        for i in dirty_list:
-            print("    cd %s/%s && git st" % (PROJECT_HOME, i))
-    else:
-        print("No projects with uncommitted changes.")
+    if not args.include_disk:
+        print("Disk usage not requested.")
 
     # Quit.
     sys.exit(EXIT_OK)
@@ -2142,4 +2297,99 @@ def project_status():
 
     print(project.to_markdown())
 
+    sys.exit(EXIT_OK)
+
+
+def stat_documentation_command():
+    """Display information on a specific set of documentation."""
+
+    __author__ = "Shawn Davis <shawn@develmaycare.com>"
+    __date__ = "2017-01-03"
+    __help__ = """NOTES
+
+Name may be partially matched and is case insensitive.
+
+    """
+    __version__ = "0.1.0-d"
+
+    # Define options and arguments.
+    parser = ArgumentParser(description=__doc__, epilog=__help__, formatter_class=RawDescriptionHelpFormatter)
+
+    parser.add_argument(
+        "documentation_name",
+        help="The title or name of the work."
+    )
+
+    parser.add_argument(
+        "-d",
+        "--disk",
+        action="store_true",
+        dest="include_disk",
+        help="Calculate disk space. Takes longer to run."
+    )
+
+    parser.add_argument(
+        "--format=",
+        choices=["markdown", "plain"],
+        default="plain",
+        dest="output_format",
+        help="Choose the format of the output.",
+        nargs="?"
+    )
+
+    parser.add_argument(
+        "-p=",
+        "--path=",
+        default=DOCUMENTATION_HOME,
+        dest="documentation_home",
+        help="Path to the documentation library. Defaults to %s" % DOCUMENTATION_HOME
+    )
+
+    # Access to the version number requires special consideration, especially
+    # when using sub parsers. The Python 3.3 behavior is different. See this
+    # answer: http://stackoverflow.com/questions/8521612/argparse-optional-subparser-for-version
+    # parser.add_argument('--version', action='version', version='%(prog)s 2.0')
+    parser.add_argument(
+        "-v",
+        action="version",
+        help="Show version number and exit.",
+        version=__version__
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        help="Show verbose version information and exit.",
+        version="%(prog)s" + " %s %s by %s" % (__version__, __date__, __author__)
+    )
+
+    # Parse arguments. Help, version, and usage errors are automatically handled.
+    args = parser.parse_args()
+
+    # Make sure DOCUMENTATION_HOME exists.
+    if not os.path.exists(args.documentation_home):
+        print_error("DOCUMENTATION_HOME does not exist: %s" % args.documentation_home, exit_code=EXIT_OTHER)
+
+    # Attempt to find the entry.
+    entry = DocumentationEntry.find(
+        args.documentation_name,
+        include_disk=args.include_disk,
+        path=args.documentation_home
+    )
+
+    # Handle problems loading the entry.
+    if not entry.is_loaded:
+        print_warning("Could not autoload the entry: %s" % args.documentation_name)
+
+        if entry.has_error:
+            print_error("Error: %s" % entry.get_error())
+
+        sys.exit(EXIT_OTHER)
+
+    # Output entry information.
+    if args.output_format == "markdown":
+        print(entry.to_markdown())
+    else:
+        print(entry.to_text())
+
+    # Quit.
     sys.exit(EXIT_OK)
