@@ -22,323 +22,27 @@ from library.repos import get_repos, Repo
 from library.shortcuts import find_file, get_input, make_dir, parse_template, print_error, print_info, print_warning, \
     read_file, write_file
 
+# Exports
+
+__all__ = (
+    "archive_project_command",
+    "bump_version_command",
+    "checkout_project_command",
+    "enable_project_command",
+    "export_github_command",
+    "generate_password",
+    "hold_project_command",
+    "init_project_command",
+    "list_dependencies_command",
+    "list_projects_command",
+    "list_documentation_command",
+    "list_repos_command",
+    "project_help_command",
+    "stat_documentation_command",
+    "stat_project_command",
+)
+
 # Commands
-
-
-def export_github_command():
-    """Export Github milestones and issues."""
-
-    # Define meta data.
-    __author__ = "Shawn Davis <shawn@develmaycare.com>"
-    __date__ = "2017-02-08"
-    __help__ = """
-We look for labels of ready, in progress, on hold, and review to determine the issue's current position in the workflow.
-        """
-    __version__ = "0.2.4-d"
-
-    # Define options and arguments.
-    parser = ArgumentParser(description=__doc__, epilog=__help__, formatter_class=RawDescriptionHelpFormatter)
-
-    parser.add_argument(
-        "repo_name",
-        help="Name of the repository."
-    )
-
-    parser.add_argument(
-        "output_file",
-        help="The file (or path) to which data should be exported. If omitted, the export goes to STDOUT.",
-        nargs="?"
-    )
-
-    parser.add_argument(
-        "--extra=",
-        action="append",
-        dest="extra_columns",
-        help="Add extra column output in the form of column_name:value. Useful when repeating the command via a shell "
-             "script."
-    )
-
-    parser.add_argument(
-        "--format=",
-        choices=["csv", "html", "markdown", "rst", "txt"],
-        default="csv",
-        dest="output_format",
-        help="Output format. Defaults to CSV."
-    )
-
-    parser.add_argument(
-        "-L=",
-        "--label=",
-        action="append",
-        dest="labels",
-        help="Filter for a specific label."
-    )
-
-    parser.add_argument(
-        "--no-header",
-        action="store_true",
-        dest="no_header",
-        help="Don't output the header for the format (if any). Also produces no footer. Useful for repeating the "
-             "command."
-    )
-
-    # Access to the version number requires special consideration, especially
-    # when using sub parsers. The Python 3.3 behavior is different. See this
-    # answer: http://stackoverflow.com/questions/8521612/argparse-optional-subparser-for-version
-    # parser.add_argument('--version', action='version', version='%(prog)s 2.0')
-    parser.add_argument(
-        "-v",
-        action="version",
-        help="Show version number and exit.",
-        version=__version__
-    )
-    parser.add_argument(
-        "--version",
-        action="version",
-        help="Show verbose version information and exit.",
-        version="%(prog)s" + " %s %s by %s" % (__version__, __date__, __author__)
-    )
-
-    # There's no need to go on if the user name and password have not been defined.
-    if not GITHUB_ENABLED:
-        print_warning("GITHUB_USER and GITHUB_PASSWORD environment variables are required.", EXIT_OTHER)
-        sys.exit()
-
-    # We also can't continue if PyGithub is not installed.
-    try:
-        from github import Github
-    except ImportError:
-        print_error("The PyGithub package is required to use this command: pip install pygithub", EXIT_OTHER)
-
-    # This will display help or input errors as needed.
-    args = parser.parse_args()
-    # print args
-
-    # Set the columns.
-    columns = [
-        "Item",
-        "Description",
-        "Start Date",
-        "End Date",
-        "Bucket",
-        "Status",
-        "Grouping",
-        "Labels",
-        "Assigned To",
-    ]
-
-    if args.extra_columns:
-        for c in args.extra_columns:
-            name, value = c.split(":")
-            columns.append(name)
-
-    # Start the output based on output format.
-    issues = list()
-    if args.output_format == "html":
-        if args.no_header:
-            pass
-        else:
-            issues.append('<table class="table table-bordered table-striped>')
-            issues.append('<thead>')
-            issues.append('<tr>')
-
-            for column_name in columns:
-                issues.append('<th>%s</th>' % column_name)
-
-            issues.append('</tr>')
-            issues.append('</thead>')
-            issues.append('<tbody>')
-    elif args.output_format == "markdown":
-        if args.no_header:
-            pass
-        else:
-            issues.append("|" + "|".join(columns) + "|")
-
-            a = list()
-            for column_name in columns:
-                a.append("-" * len(column_name))
-
-            issues.append("|" + "|".join(a) + "|")
-
-            # issues.append("|Title|Description|Start Date|End Date|Bucket|Status|Milestone|Labels|Assigned To|")
-            # issues.append("|-----|-----------|----------|--------|------|------|---------|------|-----------|")
-    elif args.output_format == "rst":
-        if args.no_header:
-            pass
-        else:
-            issues.append(".. csv-table:: %s issues" % args.repo_name)
-            issues.append("    :header: %s" % ",".join(columns))
-            issues.append("")
-    elif args.output_format == "txt":
-        pass
-    else:
-        if args.no_header:
-            pass
-        else:
-            # Roadmunk has it's own internal column for Milestone. So we rename GitHub's Milestone to "Grouping" for
-            # CSV output.
-            issues.append(",".join(columns))
-
-    # Initialize the connection to github.
-    gh = Github(GITHUB_USER, GITHUB_PASSWORD)
-
-    # Seems like loading the user is required to get at the other data.
-    user = gh.get_user()
-
-    # Get the repo instance.
-    repo = user.get_repo(args.repo_name)
-
-    # Get the issues in the repo. Assemble the output.
-    count = 0
-    for i in repo.get_issues():
-
-        # We re-use the labels below. All we want is the name of each one associated with the issue.
-        labels = list()
-        for label in i.labels:
-            labels.append(label.name)
-
-        # Filter issues based on the label.
-        label_match = False
-        if args.labels:
-
-            # Flag the issue if we find a match.
-            for label in labels:
-                if label in args.labels:
-                    label_match = True
-
-            # Skip the issue if not match is found.
-            if not label_match:
-                continue
-
-        # Increase the issue count.
-        count += 1
-
-        # Determine the current workflow of the issue.
-        if "ready" in labels:
-            status = "Next Up"
-        elif "in progress" in labels:
-            status = "In Progress"
-        elif "review" in labels:
-            status = "Review"
-        elif "on hold" in labels:
-            status = "On Hold"
-        else:
-            status = "Planning"
-
-        # Get the milestone.
-        milestone = i.milestone
-        if milestone:
-            milestone_title = milestone.title
-        else:
-            milestone_title = ""
-
-        # Get the end date and calculate the start date.
-        if milestone and milestone.due_on:
-
-            # We start with the due date of the milestone as a point of reference.
-            end = DateTime(milestone.due_on)
-
-            # The start date is 30 days prior to the end date.
-            days_ago = -30
-            start = DateTime(milestone.due_on)
-            start.increment(days=days_ago)
-
-            # Set the end and start datetimes.
-            end_date = end.dt.strftime("%Y-%m-%d")
-            start_date = start.dt.strftime("%Y-%m-%d")
-
-        else:
-            end_date = ""
-            start_date = ""
-
-        # Set the bucket if start and end date are not available.
-        bucket = ""
-        if not start_date and not end_date:
-            bucket = "Future"
-            for label in labels:
-                if "bucket" in label:
-                    bucket = label.split(":")[-1].strip()
-                    break
-
-        # Condense assignees into a series of strings.
-        try:
-            assignee_name = i.assignee.name or i.assignee.login
-        except AttributeError:
-            assignee_name = ""
-
-        # Abbreviate the description since we don't need every last word for the road map.
-        description = i.body.split(".")[0]
-        description += ". Read more: %s" % i.html_url
-
-        # Get extra (static) columns.
-        extra_columns = list()
-        if args.extra_columns:
-            for c in args.extra_columns:
-                name, value = c.split(":")
-                extra_columns.append(value)
-
-        # Create the issue instance.
-        issue = Issue(
-            i.title,
-            assigned_to=assignee_name,
-            bucket=bucket,
-            description=description,
-            end_date=end_date,
-            extra_columns=extra_columns,
-            labels=labels,
-            milestone=milestone_title,
-            start_date=start_date,
-            status=status
-        )
-
-        # Get the line.
-        if args.output_format == "html":
-            line = issue.to_html()
-        elif args.output_format == "markdown":
-            line = "|" + "|".join(issue.get_tokens()) + "|"
-        elif args.output_format == "rst":
-            line = "    %s" % issue.to_csv()
-        elif args.output_format == "txt":
-            line = "\n".join((issue.title, i.url, ""))
-        else:
-            line = issue.to_csv()
-
-        # Add the line to the issues list.
-        issues.append(line)
-
-    # Close the output.
-    if args.output_format == "html":
-        if args.no_header:
-            pass
-        else:
-            issues.append('</tbody>')
-            issues.append('</table>')
-    elif args.output_format == "markdown":
-        if args.no_header:
-            pass
-        else:
-            issues.append("")
-    elif args.output_format == "rst":
-        if args.no_header:
-            pass
-        else:
-            issues.append("")
-
-    elif args.output_format == "txt":
-        pass
-    else:
-        pass
-
-    # Write the output.
-    if len(issues) > 0:
-        output = "\n".join(issues)
-        if args.output_file:
-            write_file(args.output_file, output)
-        else:
-            print(output)
-
-    # Exit.
-    sys.exit(EXIT_OK)
 
 
 def archive_project_command():
@@ -862,6 +566,322 @@ def enable_project_command():
 
     # Exit.
     sys.exit(status)
+
+
+def export_github_command():
+    """Export Github milestones and issues."""
+
+    # Define meta data.
+    __author__ = "Shawn Davis <shawn@develmaycare.com>"
+    __date__ = "2017-02-08"
+    __help__ = """
+We look for labels of ready, in progress, on hold, and review to determine the issue's current position in the workflow.
+        """
+    __version__ = "0.2.4-d"
+
+    # Define options and arguments.
+    parser = ArgumentParser(description=__doc__, epilog=__help__, formatter_class=RawDescriptionHelpFormatter)
+
+    parser.add_argument(
+        "repo_name",
+        help="Name of the repository."
+    )
+
+    parser.add_argument(
+        "output_file",
+        help="The file (or path) to which data should be exported. If omitted, the export goes to STDOUT.",
+        nargs="?"
+    )
+
+    parser.add_argument(
+        "--extra=",
+        action="append",
+        dest="extra_columns",
+        help="Add extra column output in the form of column_name:value. Useful when repeating the command via a shell "
+             "script."
+    )
+
+    parser.add_argument(
+        "--format=",
+        choices=["csv", "html", "markdown", "rst", "txt"],
+        default="csv",
+        dest="output_format",
+        help="Output format. Defaults to CSV."
+    )
+
+    parser.add_argument(
+        "-L=",
+        "--label=",
+        action="append",
+        dest="labels",
+        help="Filter for a specific label."
+    )
+
+    parser.add_argument(
+        "--no-header",
+        action="store_true",
+        dest="no_header",
+        help="Don't output the header for the format (if any). Also produces no footer. Useful for repeating the "
+             "command."
+    )
+
+    # Access to the version number requires special consideration, especially
+    # when using sub parsers. The Python 3.3 behavior is different. See this
+    # answer: http://stackoverflow.com/questions/8521612/argparse-optional-subparser-for-version
+    # parser.add_argument('--version', action='version', version='%(prog)s 2.0')
+    parser.add_argument(
+        "-v",
+        action="version",
+        help="Show version number and exit.",
+        version=__version__
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        help="Show verbose version information and exit.",
+        version="%(prog)s" + " %s %s by %s" % (__version__, __date__, __author__)
+    )
+
+    # There's no need to go on if the user name and password have not been defined.
+    if not GITHUB_ENABLED:
+        print_warning("GITHUB_USER and GITHUB_PASSWORD environment variables are required.", EXIT_OTHER)
+        sys.exit()
+
+    # We also can't continue if PyGithub is not installed.
+    try:
+        from github import Github
+    except ImportError:
+        print_error("The PyGithub package is required to use this command: pip install pygithub", EXIT_OTHER)
+
+    # This will display help or input errors as needed.
+    args = parser.parse_args()
+    # print args
+
+    # Set the columns.
+    columns = [
+        "Item",
+        "Description",
+        "Start Date",
+        "End Date",
+        "Bucket",
+        "Status",
+        "Grouping",
+        "Labels",
+        "Assigned To",
+    ]
+
+    if args.extra_columns:
+        for c in args.extra_columns:
+            name, value = c.split(":")
+            columns.append(name)
+
+    # Start the output based on output format.
+    issues = list()
+    if args.output_format == "html":
+        if args.no_header:
+            pass
+        else:
+            issues.append('<table class="table table-bordered table-striped>')
+            issues.append('<thead>')
+            issues.append('<tr>')
+
+            for column_name in columns:
+                issues.append('<th>%s</th>' % column_name)
+
+            issues.append('</tr>')
+            issues.append('</thead>')
+            issues.append('<tbody>')
+    elif args.output_format == "markdown":
+        if args.no_header:
+            pass
+        else:
+            issues.append("|" + "|".join(columns) + "|")
+
+            a = list()
+            for column_name in columns:
+                a.append("-" * len(column_name))
+
+            issues.append("|" + "|".join(a) + "|")
+
+            # issues.append("|Title|Description|Start Date|End Date|Bucket|Status|Milestone|Labels|Assigned To|")
+            # issues.append("|-----|-----------|----------|--------|------|------|---------|------|-----------|")
+    elif args.output_format == "rst":
+        if args.no_header:
+            pass
+        else:
+            issues.append(".. csv-table:: %s issues" % args.repo_name)
+            issues.append("    :header: %s" % ",".join(columns))
+            issues.append("")
+    elif args.output_format == "txt":
+        pass
+    else:
+        if args.no_header:
+            pass
+        else:
+            # Roadmunk has it's own internal column for Milestone. So we rename GitHub's Milestone to "Grouping" for
+            # CSV output.
+            issues.append(",".join(columns))
+
+    # Initialize the connection to github.
+    gh = Github(GITHUB_USER, GITHUB_PASSWORD)
+
+    # Seems like loading the user is required to get at the other data.
+    user = gh.get_user()
+
+    # Get the repo instance.
+    repo = user.get_repo(args.repo_name)
+
+    # Get the issues in the repo. Assemble the output.
+    count = 0
+    for i in repo.get_issues():
+
+        # We re-use the labels below. All we want is the name of each one associated with the issue.
+        labels = list()
+        for label in i.labels:
+            labels.append(label.name)
+
+        # Filter issues based on the label.
+        label_match = False
+        if args.labels:
+
+            # Flag the issue if we find a match.
+            for label in labels:
+                if label in args.labels:
+                    label_match = True
+
+            # Skip the issue if not match is found.
+            if not label_match:
+                continue
+
+        # Increase the issue count.
+        count += 1
+
+        # Determine the current workflow of the issue.
+        if "ready" in labels:
+            status = "Next Up"
+        elif "in progress" in labels:
+            status = "In Progress"
+        elif "review" in labels:
+            status = "Review"
+        elif "on hold" in labels:
+            status = "On Hold"
+        else:
+            status = "Planning"
+
+        # Get the milestone.
+        milestone = i.milestone
+        if milestone:
+            milestone_title = milestone.title
+        else:
+            milestone_title = ""
+
+        # Get the end date and calculate the start date.
+        if milestone and milestone.due_on:
+
+            # We start with the due date of the milestone as a point of reference.
+            end = DateTime(milestone.due_on)
+
+            # The start date is 30 days prior to the end date.
+            days_ago = -30
+            start = DateTime(milestone.due_on)
+            start.increment(days=days_ago)
+
+            # Set the end and start datetimes.
+            end_date = end.dt.strftime("%Y-%m-%d")
+            start_date = start.dt.strftime("%Y-%m-%d")
+
+        else:
+            end_date = ""
+            start_date = ""
+
+        # Set the bucket if start and end date are not available.
+        bucket = ""
+        if not start_date and not end_date:
+            bucket = "Future"
+            for label in labels:
+                if "bucket" in label:
+                    bucket = label.split(":")[-1].strip()
+                    break
+
+        # Condense assignees into a series of strings.
+        try:
+            assignee_name = i.assignee.name or i.assignee.login
+        except AttributeError:
+            assignee_name = ""
+
+        # Abbreviate the description since we don't need every last word for the road map.
+        description = i.body.split(".")[0]
+        description += ". Read more: %s" % i.html_url
+
+        # Get extra (static) columns.
+        extra_columns = list()
+        if args.extra_columns:
+            for c in args.extra_columns:
+                name, value = c.split(":")
+                extra_columns.append(value)
+
+        # Create the issue instance.
+        issue = Issue(
+            i.title,
+            assigned_to=assignee_name,
+            bucket=bucket,
+            description=description,
+            end_date=end_date,
+            extra_columns=extra_columns,
+            labels=labels,
+            milestone=milestone_title,
+            start_date=start_date,
+            status=status
+        )
+
+        # Get the line.
+        if args.output_format == "html":
+            line = issue.to_html()
+        elif args.output_format == "markdown":
+            line = "|" + "|".join(issue.get_tokens()) + "|"
+        elif args.output_format == "rst":
+            line = "    %s" % issue.to_csv()
+        elif args.output_format == "txt":
+            line = "\n".join((issue.title, i.url, ""))
+        else:
+            line = issue.to_csv()
+
+        # Add the line to the issues list.
+        issues.append(line)
+
+    # Close the output.
+    if args.output_format == "html":
+        if args.no_header:
+            pass
+        else:
+            issues.append('</tbody>')
+            issues.append('</table>')
+    elif args.output_format == "markdown":
+        if args.no_header:
+            pass
+        else:
+            issues.append("")
+    elif args.output_format == "rst":
+        if args.no_header:
+            pass
+        else:
+            issues.append("")
+
+    elif args.output_format == "txt":
+        pass
+    else:
+        pass
+
+    # Write the output.
+    if len(issues) > 0:
+        output = "\n".join(issues)
+        if args.output_file:
+            write_file(args.output_file, output)
+        else:
+            print(output)
+
+    # Exit.
+    sys.exit(EXIT_OK)
 
 
 def generate_password():
@@ -2132,6 +2152,61 @@ Use the -f/--filter option to by most project attributes:
         print("(e) indicates an error.")
 
     # Quit.
+    sys.exit(EXIT_OK)
+
+
+def project_help_command():
+    """Get help on project commands."""
+
+    __author__ = "Shawn Davis <shawn@develmaycare.com>"
+    __date__ = "2017-03-03"
+    __help__ = """Because there are a lot of commands and we forget some of them exist.
+    """
+    __version__ = "0.1.0-d"
+
+    # Define options and arguments.
+    parser = ArgumentParser(description=__doc__, epilog=__help__, formatter_class=RawDescriptionHelpFormatter)
+
+    # Access to the version number requires special consideration, especially
+    # when using sub parsers. The Python 3.3 behavior is different. See this
+    # answer: http://stackoverflow.com/questions/8521612/argparse-optional-subparser-for-version
+    # parser.add_argument('--version', action='version', version='%(prog)s 2.0')
+    parser.add_argument(
+        "-v",
+        action="version",
+        help="Show version number and exit.",
+        version=__version__
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        help="Show verbose version information and exit.",
+        version="%(prog)s" + " %s %s by %s" % (__version__, __date__, __author__)
+    )
+
+    # This will display help or input errors as needed.
+    args = parser.parse_args()
+    # print args
+
+    # Iterate through the commands.
+    for command_name in __all__:
+        try:
+            callback = globals()[command_name]
+
+            tokens = command_name.split("_")
+            name = "%s%s" % (tokens[0], tokens[1])
+
+            # print("%s: %s" % (name, callback.__doc__))
+            # print("")
+
+            print(name)
+            print(callback.__doc__)
+            print("")
+
+        except KeyError:
+            pass
+
+    # Exit.
     sys.exit(EXIT_OK)
 
 
